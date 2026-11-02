@@ -1,6 +1,8 @@
 import { supabaseAuthProvider } from 'ra-supabase';
 import type { AuthProvider } from 'react-admin';
-import { supabaseClient } from './supabase';
+import { portal, supabaseClient } from './supabase';
+
+export type Role = 'admin' | 'user';
 
 const baseAuthProvider = supabaseAuthProvider(supabaseClient, {
   getIdentity: async (user) => {
@@ -17,11 +19,11 @@ const baseAuthProvider = supabaseAuthProvider(supabaseClient, {
   },
 });
 
-const isAdmin = async (): Promise<boolean> => {
+const fetchRole = async (): Promise<Role | null> => {
   const {
     data: { user },
   } = await supabaseClient.auth.getUser();
-  if (!user) return false;
+  if (!user) return null;
 
   const { data } = await supabaseClient
     .from('profiles')
@@ -29,17 +31,25 @@ const isAdmin = async (): Promise<boolean> => {
     .eq('id', user.id)
     .single();
 
-  return data?.role === 'admin';
+  return data?.role === 'admin' ? 'admin' : 'user';
 };
 
-// Only admins may stay logged in to this dashboard.
+// Each portal only accepts its own kind of account. The role decides what the
+// UI shows, and Row Level Security in the database decides what is allowed.
 export const authProvider: AuthProvider = {
   ...baseAuthProvider,
   login: async (params) => {
     await baseAuthProvider.login(params);
-    if (!(await isAdmin())) {
+    const role = await fetchRole();
+
+    if (portal === 'admin' && role !== 'admin') {
       await supabaseClient.auth.signOut();
-      throw new Error('This account does not have admin access.');
+      throw new Error('This portal is for admins only. Please use the user portal.');
+    }
+    if (portal === 'user' && role === 'admin') {
+      await supabaseClient.auth.signOut();
+      throw new Error('Admins sign in at /admin.');
     }
   },
+  getPermissions: async () => fetchRole(),
 };

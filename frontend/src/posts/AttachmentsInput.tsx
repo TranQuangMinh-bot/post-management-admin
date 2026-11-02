@@ -5,9 +5,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { BUCKET, publicUrl, supabaseClient } from '../supabase';
 
-// Strips the "<timestamp>-<8 hex>-" prefix added at upload time.
+// Paths look like "<user-id>/<timestamp>-<8 hex>-<name>"; show just the original name.
 export const displayName = (path: string): string =>
-  path.replace(/^\d+-[0-9a-f]{8}-/, '');
+  (path.split('/').pop() ?? path).replace(/^\d+-[0-9a-f]{8}-/, '');
 
 type Props = { source: string; label?: string };
 
@@ -23,12 +23,21 @@ export const AttachmentsInput = ({ source, label = 'Attachments' }: Props) => {
     e.target.value = '';
     if (!files.length) return;
 
+    // Storage only accepts uploads into a folder named after the signed-in user.
+    const {
+      data: { user },
+    } = await supabaseClient.auth.getUser();
+    if (!user) {
+      notify('You need to be signed in to upload files', { type: 'error' });
+      return;
+    }
+
     setUploading(true);
     const uploaded: string[] = [];
 
     for (const file of files) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safeName}`;
+      const path = `${user.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safeName}`;
       const { error } = await supabaseClient.storage
         .from(BUCKET)
         .upload(path, file);
